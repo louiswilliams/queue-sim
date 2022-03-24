@@ -1,3 +1,7 @@
+//
+// Queueing model simulator for re-entrant tasks. 
+//
+
 // TODO: test multiple trials
 const kIterations = 10000;
 
