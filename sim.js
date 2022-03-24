@@ -6,22 +6,24 @@
 const kIterations = 10000;
 
 // Average number of new tasks arriving per tick +- kArrivalRange
-const kArrivalRate = 2;
+const kArrivalRate = 3;
 const kArrivalRange = 1;
 
 // Number of workers that process a task per tick. 
 const kWorkers = 64;
 
-const kQueuePolicy = "FIFO";
+// const kQueuePolicy = "FIFO";
 // const kQueuePolicy = "LIFO";
+// const kQueuePolicy = "NewFirst";
+let kQueuePolicy;
 
 // Average number of ticks per task +- kWorkRange
-const kWorkAvg = 3;
-const kWorkRange = 2;
+const kWorkAvg = 4;
+const kWorkRange = 3;
 
 // Average number of re-entries per task +- kWorkRepeatRange
-const kWorkRepeatAvg = 10;
-const kWorkRepeatRange = 1;
+const kWorkRepeatAvg = 5;
+const kWorkRepeatRange = 5;
 
 const initSimContext = () => {
     const ctx = {};
@@ -35,6 +37,7 @@ const initSimContext = () => {
 
     // Tasks waiting to run.
     ctx.queue = [];
+    ctx.newArrivals = [];
     // Tasks that have completed.
     ctx.done = [];
     // Stats
@@ -63,19 +66,35 @@ const getTicks = () => {
     return Math.floor(gaussianRandom(kWorkAvg - kWorkRange, kWorkAvg + kWorkRange));
 };
 
-const enqueueAll = (ctx, newArrivals) => {
-    ctx.queue.push(...newArrivals);
+const enqueueNew = (ctx, tasks) => {
+    ctx.newArrivals.push(...tasks);
+};
+
+const enqueueRepeats = (ctx, tasks) => {
+    ctx.queue.push(...tasks);
 };
 
 const dequeueOne = (ctx) => {
-    if (ctx.queue.length == 0) {
-        return null;
-    }
     if (kQueuePolicy == "FIFO") {
-        return ctx.queue.shift();
+        if (ctx.queue.length > 0) {
+            return ctx.queue.shift();
+        } if (ctx.newArrivals.length > 0) {
+            return ctx.newArrivals.shift();
+        }
     } else if (kQueuePolicy == "LIFO") {
-        return ctx.queue.pop();
+        if (ctx.newArrivals.length > 0) {
+            return ctx.newArrivals.pop();
+        } else if (ctx.queue.length > 0) {
+            return ctx.queue.pop();
+        }
+    } else if (kQueuePolicy == "NewFirst") {
+        if (ctx.newArrivals.length > 0) {
+            return ctx.newArrivals.shift();
+        } else if (ctx.queue.length > 0) {
+            return ctx.queue.shift();
+        }
     }
+    return null;
 };
 
 const step = (ctx, i) => {
@@ -120,20 +139,22 @@ const step = (ctx, i) => {
     }
 
     // Add repeats
+    let repeats = [];
     for (let i = 0; i < doneTasks.length; i++) {
         const task = doneTasks[i];
         if (task.repeatsLeft > 0) {
             task.repeatsLeft -= 1;
             // Refresh ticks when re-entering.
             task.ticksLeft = getTicks();
-            arrivals.push(task);
+            repeats.push(task);
         } else {
             ctx.done.push(task);
         }
     }
 
-    // Enqueue all new arrivals. Note that the repeat tasks have been appended at the end, so 
-    enqueueAll(ctx, arrivals);
+    // Enqueue all new arrivals.
+    enqueueNew(ctx, arrivals);
+    enqueueRepeats(ctx, repeats);
 
     // Allocate tasks to workers
     for (let i = 0; i < availableWorkers.length; i++) {
@@ -170,7 +191,7 @@ const logStats = (dataSet) => {
     console.log("max", sorted[sorted.length - 1]);
 };
 
-async function run() {
+const runTrial = () => {
     const context = initSimContext();
 
     for (let i = 0; i < kIterations; i++) {
@@ -199,6 +220,14 @@ async function run() {
 
     console.log("-- total latencies --");
     logStats(context.done.map(task => task.totalTicks + task.ticksWaiting));
+}
+
+async function run() {
+
+    ["FIFO", "LIFO", "NewFirst"].forEach((policy) => {
+        kQueuePolicy = policy;
+        runTrial();
+    });
 }
 
 window.onload = () => {
