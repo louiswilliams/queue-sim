@@ -1,23 +1,29 @@
+// TODO: test multiple trials
+const kIterations = 10000;
 
-
-const kIterations = 1000;
-
+// Average number of new tasks arriving per tick +- kArrivalRange
 const kArrivalRate = 2;
 const kArrivalRange = 1;
 
-const kWorkers = 32;
-// const kQueuePolicy = "FIFO";
-const kQueuePolicy = "LIFO";
+// Number of workers that process a task per tick. 
+const kWorkers = 64;
+
+const kQueuePolicy = "FIFO";
+// const kQueuePolicy = "LIFO";
+
+// Average number of ticks per task +- kWorkRange
 const kWorkAvg = 3;
 const kWorkRange = 2;
-const kWorkRepeatAvg = 5;
+
+// Average number of re-entries per task +- kWorkRepeatRange
+const kWorkRepeatAvg = 10;
 const kWorkRepeatRange = 1;
 
 const initSimContext = () => {
     const ctx = {};
     ctx.lastId = 0;
 
-    // When zero, worker is available, when non-zero, ticks remaining for task.
+    // When null, worker is available.
     ctx.workers = [];
     for (let i = 0; i < kWorkers; i++) {
         ctx.workers[i] = null;
@@ -38,11 +44,14 @@ const initSimContext = () => {
 const makeTask = (ctx) => {
     let task = {};
     task.id = ++ctx.lastId;
+    // Ticks spent waiting in a queue.
     task.ticksWaiting = 0;
+    // Ticks remaining for this task for this repetition.
     task.ticksLeft = getTicks();
+    // Number of times to re-queue in the system.
     task.repeatsLeft = Math.floor(gaussianRandom(kWorkRepeatAvg - kWorkRepeatRange, kWorkRepeatAvg + kWorkRepeatRange));
+    // Total number of ticks spent processing across repeated runs.
     task.totalTicks = 0;
-    task.totalRepeats = 0;
     return task;
 }
 
@@ -97,11 +106,12 @@ const step = (ctx, i) => {
         ctx.queue[i].ticksWaiting += 1;
     }
 
-    const numArrivals = Math.max(0, Math.floor(gaussianRandom(kArrivalRate - kArrivalRange, kArrivalRate + kArrivalRange)));
+    // TODO: Use poisson distribution, not normal.
+    const newArrivals = Math.max(0, Math.floor(gaussianRandom(kArrivalRate - kArrivalRange, kArrivalRate + kArrivalRange)));
     let arrivals = [];
 
     // Generate ticks required for each arrival
-    for (let i = 0; i < numArrivals; i++) {
+    for (let i = 0; i < newArrivals; i++) {
         arrivals.push(makeTask(ctx));
     }
 
@@ -110,7 +120,7 @@ const step = (ctx, i) => {
         const task = doneTasks[i];
         if (task.repeatsLeft > 0) {
             task.repeatsLeft -= 1;
-            // Refresh ticks.
+            // Refresh ticks when re-entering.
             task.ticksLeft = getTicks();
             arrivals.push(task);
         } else {
@@ -146,6 +156,16 @@ const step = (ctx, i) => {
     // }
 };
 
+const logStats = (dataSet) => {
+    const sorted = dataSet.sort((a, b) => a - b);
+    console.log("avg", average(sorted));
+    console.log("min", sorted[0]);
+    console.log("p50", percentileSorted(sorted, 0.50));
+    console.log("p95", percentileSorted(sorted, 0.95));
+    console.log("p99", percentileSorted(sorted, 0.99));
+    console.log("max", sorted[sorted.length - 1]);
+};
+
 async function run() {
     const context = initSimContext();
 
@@ -154,50 +174,27 @@ async function run() {
         // await sleep(100);
     }
 
-    // Calcuate some summary statistics.
+    console.log("-- parameters --")
     console.log("queue policy", kQueuePolicy);
+    console.log("ticks", kIterations);
+    console.log("workers", kWorkers);
+    console.log("arrival rate per tick (min,max)", kArrivalRate - kArrivalRange, kArrivalRate + kArrivalRange);
+    console.log("ticks per task (min,max)", kWorkAvg - kWorkRange, kWorkAvg + kWorkRange);
+    console.log("repeats per task (min,max)", kWorkRepeatAvg - kWorkRepeatRange, kWorkRepeatAvg + kWorkRepeatRange);
+
+    console.log("-- results --");
     console.log("unscheduled", context.queue.length);
     console.log("done", context.done.length);
 
-    const allWaiting = context.done.map(task => task.ticksWaiting).sort((a, b) => a - b);
-    const waitAvg = average(allWaiting);
-    const waitMin = allWaiting[0];
-    const waitp50 = percentileSorted(allWaiting, 0.50);
-    const waitp95 = percentileSorted(allWaiting, 0.95);
-    const waitp99 = percentileSorted(allWaiting, 0.99);
-    const waitMax = allWaiting[allWaiting.length - 1];
+    // Calcuate some summary statistics.
     console.log("-- waiting latencies --");
-    console.log("avg", waitAvg);
-    console.log("min", waitMin);
-    console.log("p50", waitp50);
-    console.log("p95", waitp95);
-    console.log("p95", waitp99);
-    console.log("max", waitMax);
+    logStats(context.done.map(task => task.ticksWaiting))
 
-    const processTicks = context.done.map(task => task.totalTicks).sort((a, b) => a - b);
-    const processAvg = average(processTicks);
-    const processMin = processTicks[0];
-    const processp50 = percentileSorted(processTicks, 0.50);
-    const processp95 = percentileSorted(processTicks, 0.95);
-    const processp99 = percentileSorted(processTicks, 0.99);
-    const processMax = processTicks[processTicks.length - 1];
     console.log("-- processing latencies --");
-    console.log("avg", processAvg);
-    console.log("min", processMin);
-    console.log("p50", processp50);
-    console.log("p95", processp95);
-    console.log("p95", processp99);
-    console.log("max", processMax);
+    logStats(context.done.map(task => task.totalTicks));
 
-    const totalTicks = context.done.map(task => task.totalTicks + task.ticksWaiting).sort((a, b) => a - b);
     console.log("-- total latencies --");
-    console.log("avg", average(totalTicks));
-    console.log("min", totalTicks[0]);
-    console.log("p50", percentileSorted(totalTicks, 0.5));
-    console.log("p95", percentileSorted(totalTicks, 0.95));
-    console.log("p95", percentileSorted(totalTicks, 0.99));
-    console.log("max", totalTicks[totalTicks.length - 1]);
-
+    logStats(context.done.map(task => task.totalTicks + task.ticksWaiting));
 }
 
 window.onload = () => {
@@ -214,9 +211,10 @@ function sleep(ms) {
 }
 
 function gaussianRandom(start, end) {
+    // Central limit theorum to generate a normally-distributed random value
+    //between start and end.
     let rand = 0;
-
-    for (var i = 0; i < 6; i += 1) {
+    for (let i = 0; i < 6; i += 1) {
         rand += Math.random();
     }
 
