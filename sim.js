@@ -199,18 +199,26 @@ const logStats = (dataSet) => {
 };
 
 const runTrial = (context) => {
-
-    let ticks = 0;
-    let done = false;
-    while (!done) {
-        const drain = ticks++ > kIterations;
-        done = step(context, drain);
-    }
-
     console.log("-----------")
     console.log("-- TRIAL --")
     console.log("-----------")
     console.log("queue policy", context.policy);
+
+    let ticks = 0;
+    let done = false;
+    let isDraining = false;
+    while (!done) {
+        const drain = ticks++ > kIterations;
+        if (!isDraining && drain) {
+            isDraining = true;
+
+            console.log("-- latencies before drain --");
+            logStats(context.done.map(task => task.totalTicks + task.ticksWaiting));
+
+        }
+        done = step(context, drain);
+    }
+
     console.log("-- results --");
     console.log("ticks", ticks);
     console.log("new arrival max length", context.stats.newMaxLen);
