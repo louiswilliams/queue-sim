@@ -241,17 +241,19 @@ const runTrial = (context) => {
             context.log("-- LATENCIES BEFORE DRAIN --");
             context.log("----------------------------");
             logStats(context.done.map(task => task.ticksActive + task.ticksWaiting), context.log);
+            context.log("completed", context.done.length);
+            context.log("remaining", context.queue.length + context.newArrivals.length);
 
         }
         done = step(context, drain);
     }
 
     context.log("---------------------");
-    context.log("-- TOTAL LATENCIES --");
+    context.log("-- TOTAL LATENCIES AFTER DRAIN --");
     context.log("---------------------");
     logStats(context.done.map(task => task.ticksActive + task.ticksWaiting), context.log);
     context.log("-------------");
-    context.log("-- RESULTS --");
+    context.log("-- SUMMARY --");
     context.log("-------------");
     context.log("total ticks", ticks);
     const totalTasks = context.done.length + context.timedOut.length;
