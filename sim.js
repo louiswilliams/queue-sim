@@ -200,17 +200,20 @@ const drawHist = (sorted) => {
         buckets[myBucket] += 1;
     }
     const largestBucket = Math.max(...buckets);
+    const padLen = Math.log10(max) + 1;
     for (let i = 0; i < buckets.length; i++) {
         const fill = 20 * buckets[i] / largestBucket;
         const rangeMin = Math.floor(i * (range / nBuckets) + min);
         const rangeMax = Math.floor((i + 1) * (range / nBuckets) + min - 1);
-        log(`[${rangeMin.toString().padStart(5, ' ')} - ${rangeMax.toString().padStart(5, ' ')}]: ${'='.repeat(fill)} ${buckets[i]}`);
+        const minTxt = rangeMin.toString().padStart(padLen, ' ');
+        const maxTxt = rangeMax.toString().padStart(padLen, ' ');
+        log(`[${minTxt} - ${maxTxt}]: ${'='.repeat(fill)} ${buckets[i]}`);
     }
 }
 const logStats = (dataSet) => {
     const sorted = dataSet.sort((a, b) => a - b);
-    log("avg", average(sorted));
-    log("dev", stdDev(sorted));
+    log("avg", average(sorted).toFixed(1));
+    log("dev", stdDev(sorted).toFixed(1));
     log("min", sorted[0]);
     log("p50", percentileSorted(sorted, 0.50));
     log("p95", percentileSorted(sorted, 0.95));
@@ -220,10 +223,9 @@ const logStats = (dataSet) => {
 };
 
 const runTrial = (context) => {
-    log("-----------")
-    log("-- TRIAL --")
-    log("-----------")
-    log("queue policy", context.policy);
+    log("-----------------")
+    log(`-- TRIAL: ${context.policy} --`)
+    log("-----------------")
 
     let ticks = 0;
     let done = false;
@@ -233,17 +235,14 @@ const runTrial = (context) => {
         if (!isDraining && drain) {
             isDraining = true;
 
-            log("-- latencies before drain --");
+            log("----------------------------");
+            log("-- LATENCIES BEFORE DRAIN --");
+            log("----------------------------");
             logStats(context.done.map(task => task.totalTicks + task.ticksWaiting));
 
         }
         done = step(context, drain);
     }
-
-    log("-- results --");
-    log("total ticks", ticks);
-    log("new arrival max length", context.stats.newMaxLen);
-    log("repeat queue max length", context.stats.queueMaxLen);
 
     // Calcuate some summary statistics.
     // log("-- waiting latencies --");
@@ -252,12 +251,25 @@ const runTrial = (context) => {
     // log("-- processing latencies --");
     // logStats(context.done.map(task => task.totalTicks));
 
-    log("-- total latencies --");
+    log("---------------------");
+    log("-- TOTAL LATENCIES --");
+    log("---------------------");
     logStats(context.done.map(task => task.totalTicks + task.ticksWaiting));
+    log("-------------");
+    log("-- RESULTS --");
+    log("-------------");
+    log("total ticks", ticks);
+    log("throughput (tasks/tick)", (context.done.length / ticks).toFixed(1));
+    log("arrival queue max length", context.stats.newMaxLen);
+    log("repeat queue max length", context.stats.queueMaxLen);
+
+    log("\n");
 }
 
 async function run() {
-    log("-- parameters --");
+    log("----------------");
+    log("-- PARAMETERS --");
+    log("----------------");
     log("arrival ticks", kIterations);
     log("workers", kWorkers);
     log("arrival rate per tick (min,max)", kArrivalRate - kArrivalRange, kArrivalRate + kArrivalRange);
