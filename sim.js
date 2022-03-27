@@ -47,7 +47,7 @@ const getTicks = (ctx) => {
 };
 
 const getNumArrivals = (ctx) => {
-    return Math.max(0, Math.floor(gaussianRandom(ctx.params.arrivalRate - ctx.params.arrivalRange, ctx.params.arrivalRate + ctx.params.arrivalRange)));
+    return poissonRandom(ctx.params.arrivalRate);
 };
 
 const enqueueNew = (ctx, tasks) => {
@@ -151,7 +151,6 @@ const step = (ctx, drain) => {
         return true;
     }
 
-    // TODO: Use poisson distribution, not normal.
     // When draining, stop generating new arrivals.
     const newArrivals = (drain) ? 0 : getNumArrivals(ctx);
     let arrivals = [];
@@ -284,7 +283,6 @@ async function run(output, done = () => { }) {
 
     // Average number of new tasks arriving per tick +- range 
     params.arrivalRate = getParam("arrivalRateAvg");
-    params.arrivalRange = getParam("arrivalRateRange");
 
     // Average number of ticks per task +- range 
     params.workAvg = getParam("workAvg");
@@ -354,6 +352,19 @@ function percentileSorted(sorted, p) {
 
 function average(array) {
     return array.reduce((tot, a) => tot + a, 0) / array.length;
+}
+
+function poissonRandom(lambda) {
+    // https://stackoverflow.com/questions/1241555/algorithm-to-generate-poisson-and-binomial-random-numbers
+    const L = Math.exp(-lambda);
+    let p = 1.0;
+    let k = 0;
+    do {
+        k++;
+        p *= Math.random();
+    } while (p > L);
+
+    return k - 1;
 }
 
 function stdDev(array) {
