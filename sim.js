@@ -247,9 +247,9 @@ const runTrial = (context) => {
     context.log("-------------");
     context.log("total ticks", ticks);
     const totalTasks = context.done.length + context.timedOut.length;
-    const timedOutPct = (100 * context.timedOut.length / totalTasks).toFixed(2);
+    const timedOutPct = (100 * context.timedOut.length / totalTasks).toFixed(1);
     context.log("timed out", context.timedOut.length, `(${timedOutPct}%)`);
-    context.log("goodput (tasks/tick)", (context.done.length / ticks).toFixed(3));
+    context.log("goodput (tasks/1000 ticks)", (1000 * context.done.length / ticks).toFixed(1));
     context.log("arrival queue max length", context.stats.newMaxLen);
     context.log("repeat queue max length", context.stats.queueMaxLen);
 
@@ -301,10 +301,10 @@ async function run(output, done = () => { }) {
 
 window.onload = () => {
     const output = document.getElementById("trials");
+    const trialForm = document.getElementById("trialForm");
     const runBtn = document.getElementById("run");
 
-    run(output);
-    runBtn.onclick = () => {
+    const doRun = () => {
         runBtn.innerHTML = "Running...";
         runBtn.disabled = true;
         setTimeout(() => {
@@ -313,6 +313,11 @@ window.onload = () => {
                 runBtn.innerHTML = "Run";
             });
         }, 1);
+    };
+
+    trialForm.onsubmit = () => {
+        doRun();
+        return false;
     }
 };
 
