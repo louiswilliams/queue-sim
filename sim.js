@@ -130,7 +130,7 @@ const step = (ctx, drain) => {
             }
         } else {
             console.error("negative ticks left");
-            console.log(task, i);
+            log(task, i);
         }
     }
 
@@ -188,21 +188,42 @@ const step = (ctx, drain) => {
     return false;
 };
 
+const drawHist = (sorted) => {
+    const min = sorted[0];
+    const max = sorted[sorted.length - 1];
+    const range = max - min;
+    const nBuckets = 10;
+    const buckets = Array(nBuckets).fill(0);
+
+    for (let i = 0; i < sorted.length; i++) {
+        const myBucket = Math.min(Math.floor(((sorted[i] - min) / range) * nBuckets), nBuckets - 1);
+        buckets[myBucket] += 1;
+    }
+    const largestBucket = Math.max(...buckets);
+    for (let i = 0; i < buckets.length; i++) {
+        const fill = 20 * buckets[i] / largestBucket;
+        const rangeMin = Math.floor(i * (range / nBuckets) + min);
+        const rangeMax = Math.floor((i + 1) * (range / nBuckets) + min - 1);
+        log(`[${rangeMin.toString().padStart(5, ' ')} - ${rangeMax.toString().padStart(5, ' ')}]: ${'='.repeat(fill)} ${buckets[i]}`);
+    }
+}
 const logStats = (dataSet) => {
     const sorted = dataSet.sort((a, b) => a - b);
-    console.log("avg", average(sorted));
-    console.log("min", sorted[0]);
-    console.log("p50", percentileSorted(sorted, 0.50));
-    console.log("p95", percentileSorted(sorted, 0.95));
-    console.log("p99", percentileSorted(sorted, 0.99));
-    console.log("max", sorted[sorted.length - 1]);
+    log("avg", average(sorted));
+    log("dev", stdDev(sorted));
+    log("min", sorted[0]);
+    log("p50", percentileSorted(sorted, 0.50));
+    log("p95", percentileSorted(sorted, 0.95));
+    log("p99", percentileSorted(sorted, 0.99));
+    log("max", sorted[sorted.length - 1]);
+    drawHist(sorted);
 };
 
 const runTrial = (context) => {
-    console.log("-----------")
-    console.log("-- TRIAL --")
-    console.log("-----------")
-    console.log("queue policy", context.policy);
+    log("-----------")
+    log("-- TRIAL --")
+    log("-----------")
+    log("queue policy", context.policy);
 
     let ticks = 0;
     let done = false;
@@ -212,35 +233,36 @@ const runTrial = (context) => {
         if (!isDraining && drain) {
             isDraining = true;
 
-            console.log("-- latencies before drain --");
+            log("-- latencies before drain --");
             logStats(context.done.map(task => task.totalTicks + task.ticksWaiting));
 
         }
         done = step(context, drain);
     }
 
-    console.log("-- results --");
-    console.log("ticks", ticks);
-    console.log("new arrival max length", context.stats.newMaxLen);
-    console.log("repeat queue max length", context.stats.queueMaxLen);
+    log("-- results --");
+    log("total ticks", ticks);
+    log("new arrival max length", context.stats.newMaxLen);
+    log("repeat queue max length", context.stats.queueMaxLen);
 
     // Calcuate some summary statistics.
-    // console.log("-- waiting latencies --");
+    // log("-- waiting latencies --");
     // logStats(context.done.map(task => task.ticksWaiting))
 
-    // console.log("-- processing latencies --");
+    // log("-- processing latencies --");
     // logStats(context.done.map(task => task.totalTicks));
 
-    console.log("-- total latencies --");
+    log("-- total latencies --");
     logStats(context.done.map(task => task.totalTicks + task.ticksWaiting));
 }
 
 async function run() {
-    console.log("ticks", kIterations);
-    console.log("workers", kWorkers);
-    console.log("arrival rate per tick (min,max)", kArrivalRate - kArrivalRange, kArrivalRate + kArrivalRange);
-    console.log("ticks per task (min,max)", kWorkAvg - kWorkRange, kWorkAvg + kWorkRange);
-    console.log("repeats per task (min,max)", kWorkRepeatAvg - kWorkRepeatRange, kWorkRepeatAvg + kWorkRepeatRange);
+    log("-- parameters --");
+    log("arrival ticks", kIterations);
+    log("workers", kWorkers);
+    log("arrival rate per tick (min,max)", kArrivalRate - kArrivalRange, kArrivalRate + kArrivalRange);
+    log("ticks per task (min,max)", kWorkAvg - kWorkRange, kWorkAvg + kWorkRange);
+    log("repeats per task (min,max)", kWorkRepeatAvg - kWorkRepeatRange, kWorkRepeatAvg + kWorkRepeatRange);
 
     ["FIFO", "LIFO", "NewFirst"].forEach((policy) => {
         const context = initSimContext();
@@ -249,11 +271,17 @@ async function run() {
     });
 }
 
+let output;
+function log() {
+    console.log.apply(null, arguments);
+    output.innerHTML += Array.from(arguments).join(" ") + "<br>";
+};
+
 window.onload = () => {
-    const output = document.getElementById("output");
+    output = document.getElementById("output");
 
     run().catch((err) => {
-        console.log(err);
+        log(err);
     });
     // Output stats.
 };
