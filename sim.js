@@ -20,6 +20,9 @@ const kWorkRange = 2;
 const kWorkRepeatAvg = 4;
 const kWorkRepeatRange = 2;
 
+// Limit on the number of ticks before a task is considered failed.
+const kTimeout = 5000;
+
 const initSimContext = () => {
     const ctx = {};
     ctx.lastId = 0;
@@ -38,6 +41,8 @@ const initSimContext = () => {
     ctx.newArrivals = [];
     // Tasks that have completed.
     ctx.done = [];
+    // Tasks that failed after reaching their timeout.
+    ctx.timedOut = [];
     // Stats
     ctx.stats = {
         ticks: 0,
@@ -56,8 +61,8 @@ const makeTask = (ctx) => {
     task.ticksLeft = getTicks();
     // Number of times to re-queue in the system.
     task.repeatsLeft = Math.floor(gaussianRandom(kWorkRepeatAvg - kWorkRepeatRange, kWorkRepeatAvg + kWorkRepeatRange));
-    // Total number of ticks spent processing across repeated runs.
-    task.totalTicks = 0;
+    // Number of ticks spent active across all repeats.
+    task.ticksActive = 0;
     return task;
 }
 
@@ -121,8 +126,12 @@ const step = (ctx, drain) => {
         }
         if (task.ticksLeft) {
             task.ticksLeft -= 1;
-            task.totalTicks += 1;
-            if (task.ticksLeft == 0) {
+            task.ticksActive += 1;
+            if (task.ticksActive + task.ticksWaiting > kTimeout) {
+                ctx.timedOut.push(task);
+                availableWorkers.push(i);
+                ctx.workers[i] = null;
+            } else if (task.ticksLeft == 0) {
                 // This task just completed. It is eligible for re-entry.
                 doneTasks.push(task);
                 availableWorkers.push(i);
@@ -136,10 +145,20 @@ const step = (ctx, drain) => {
 
     // Tick everything in each queue
     for (let i = 0; i < ctx.newArrivals.length; i++) {
-        ctx.newArrivals[i].ticksWaiting += 1;
+        const task = ctx.newArrivals[i];
+        task.ticksWaiting += 1;
+        if (task.ticksActive + task.ticksWaiting > kTimeout) {
+            ctx.newArrivals.splice(i, 1);
+            ctx.timedOut.push(task);
+        }
     }
     for (let i = 0; i < ctx.queue.length; i++) {
-        ctx.queue[i].ticksWaiting += 1;
+        const task = ctx.queue[i];
+        task.ticksWaiting += 1;
+        if (task.ticksActive + task.ticksWaiting > kTimeout) {
+            ctx.queue.splice(i, 1);
+            ctx.timedOut.push(task);
+        }
     }
 
     // If everything is empty, we are done.
@@ -238,7 +257,7 @@ const runTrial = (context) => {
             log("----------------------------");
             log("-- LATENCIES BEFORE DRAIN --");
             log("----------------------------");
-            logStats(context.done.map(task => task.totalTicks + task.ticksWaiting));
+            logStats(context.done.map(task => task.ticksActive + task.ticksWaiting));
 
         }
         done = step(context, drain);
@@ -249,17 +268,20 @@ const runTrial = (context) => {
     // logStats(context.done.map(task => task.ticksWaiting))
 
     // log("-- processing latencies --");
-    // logStats(context.done.map(task => task.totalTicks));
+    // logStats(context.done.map(task => task.ticksActive));
 
     log("---------------------");
     log("-- TOTAL LATENCIES --");
     log("---------------------");
-    logStats(context.done.map(task => task.totalTicks + task.ticksWaiting));
+    logStats(context.done.map(task => task.ticksActive + task.ticksWaiting));
     log("-------------");
     log("-- RESULTS --");
     log("-------------");
     log("total ticks", ticks);
-    log("throughput (tasks/tick)", (context.done.length / ticks).toFixed(1));
+    const totalTasks = context.done.length + context.timedOut.length;
+    const timedOutPct = (100 * context.timedOut.length / totalTasks).toFixed(2);
+    log("timed out", context.timedOut.length, `${timedOutPct}%`);
+    log("goodput (tasks/tick)", (context.done.length / ticks).toFixed(3));
     log("arrival queue max length", context.stats.newMaxLen);
     log("repeat queue max length", context.stats.queueMaxLen);
 
@@ -272,6 +294,7 @@ async function run() {
     log("----------------");
     log("arrival ticks", kIterations);
     log("workers", kWorkers);
+    log("timeout ticks", kTimeout);
     log("arrival rate per tick (min,max)", kArrivalRate - kArrivalRange, kArrivalRate + kArrivalRange);
     log("ticks per task (min,max)", kWorkAvg - kWorkRange, kWorkAvg + kWorkRange);
     log("repeats per task (min,max)", kWorkRepeatAvg - kWorkRepeatRange, kWorkRepeatAvg + kWorkRepeatRange);
