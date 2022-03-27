@@ -2,6 +2,152 @@
 // Queueing model simulator for re-entrant tasks. 
 //
 
+class Queue {
+
+    enqueue(newArrivals, repeats) { };
+    dequeue() { };
+    length() { }
+    // Iterates through all elements. If the provided function returns 'true', removes the element.
+    forEachAndRemoveIf(eachFn) { }
+};
+
+class FIFOQueue extends Queue {
+    constructor() {
+        super();
+        this.queue = [];
+    }
+
+    enqueue(newArrivals, repeats) {
+        this.queue.push(...newArrivals);
+        this.queue.push(...repeats);
+    }
+
+    dequeue() {
+        if (this.queue.length > 0) {
+            return this.queue.shift();
+        } else {
+            return null;
+        }
+    }
+
+    forEachAndRemoveIf(eachFn) {
+        for (let i = 0; i < this.queue.length; i++) {
+            if (eachFn(this.queue[i])) {
+                this.queue.splice(i, 1);
+            }
+        }
+    }
+
+    length() { return this.queue.length; }
+};
+
+class LIFOQueue extends Queue {
+    constructor() {
+        super();
+        this.queue = [];
+    }
+
+    enqueue(newArrivals, repeats) {
+        this.queue.push(...newArrivals);
+        this.queue.push(...repeats);
+    }
+
+    dequeue() {
+        if (this.length() > 0) {
+            return this.queue.pop();
+        } else {
+            return null;
+        }
+    }
+
+    forEachAndRemoveIf(eachFn) {
+        for (let i = 0; i < this.queue.length; i++) {
+            if (eachFn(this.queue[i])) {
+                this.queue.splice(i, 1);
+            }
+        }
+    }
+
+    length() { return this.queue.length; }
+};
+
+class NewFirstQueue extends Queue {
+    constructor() {
+        super();
+        this.newArrivals = [];
+        this.repeats = [];
+    }
+
+    enqueue(newArrivals, repeats) {
+        this.newArrivals.push(...newArrivals);
+        this.repeats.push(...repeats);
+    }
+
+    dequeue() {
+        if (this.newArrivals.length > 0) {
+            return this.newArrivals.shift();
+        } else if (this.repeats.length > 0) {
+            return this.repeats.shift();
+        } else {
+            return null;
+        }
+    }
+
+    forEachAndRemoveIf(eachFn) {
+        for (let i = 0; i < this.newArrivals.length; i++) {
+            if (eachFn(this.newArrivals[i])) {
+                this.newArrivals.splice(i, 1);
+            }
+        }
+        for (let i = 0; i < this.repeats.length; i++) {
+            if (eachFn(this.repeats[i])) {
+                this.repeats.splice(i, 1);
+            }
+        }
+    }
+
+    length() { return this.newArrivals.length + this.repeats.length; }
+};
+
+class DeadlinePriorityQueue extends Queue {
+    constructor() {
+        super();
+        this.queue = [];
+    }
+
+    enqueue(newArrivals, repeats) {
+        this.queue.push(...newArrivals);
+        this.queue.push(...repeats);
+
+        // Sort both queues by deadline priority and pick the operation with the closest deadline.
+        this.queue.sort((a, b) => {
+            const diff = getTicksLeft(a) - getTicksLeft(b);
+            if (diff) {
+                return diff;
+            }
+            return b.id - a.id;
+        });
+    }
+
+    dequeue() {
+        if (this.queue.length > 0) {
+            return this.queue.shift();
+        } else {
+            return null;
+        }
+    }
+
+    forEachAndRemoveIf(eachFn) {
+        for (let i = 0; i < this.queue.length; i++) {
+            if (eachFn(this.queue[i])) {
+                this.queue.splice(i, 1);
+            }
+        }
+    }
+
+    length() { return this.queue.length; }
+};
+
 const initSimContext = (params, logFn) => {
     const ctx = {};
     ctx.params = params;
@@ -16,7 +162,17 @@ const initSimContext = (params, logFn) => {
     ctx.lastId = 0;
 
     // Tasks waiting to run.
-    ctx.queue = [];
+    if (params.policy == "FIFO") {
+        ctx.queue = new FIFOQueue();
+    } else if (params.policy == "LIFO") {
+        ctx.queue = new LIFOQueue();
+    } else if (params.policy == "NewFirst") {
+        ctx.queue = new NewFirstQueue();
+    } else if (params.policy == "DeadlinePriority") {
+        ctx.queue = new DeadlinePriorityQueue();
+    } else {
+        throw "unknown queue";
+    }
     ctx.newArrivals = [];
     // Tasks that have completed.
     ctx.done = [];
@@ -26,7 +182,6 @@ const initSimContext = (params, logFn) => {
     ctx.stats = {
         ticks: 0,
         queueMaxLen: 0,
-        newMaxLen: 0,
     };
     return ctx;
 };
@@ -64,70 +219,6 @@ const getTicksLeft = (task) => {
     return task.timeout - (task.ticksActive + task.ticksWaiting);
 };
 
-const enqueue = (ctx, newArrivals, repeats) => {
-    ctx.newArrivals.push(...newArrivals);
-    if (ctx.newArrivals.length > ctx.stats.newMaxLen) {
-        ctx.stats.newMaxLen = ctx.newArrivals.length;
-    }
-    ctx.queue.push(...repeats);
-    if (ctx.queue.length > ctx.stats.queueMaxLen) {
-        ctx.stats.queueMaxLen = ctx.queue.length;
-    }
-
-    if (ctx.params.policy == "DeadlinePriority") {
-        // Sort both queues by deadline priority and pick the operation with the closest deadline.
-        ctx.newArrivals.sort((a, b) => {
-            const diff = getTicksLeft(a) - getTicksLeft(b);
-            if (diff) {
-                return diff;
-            }
-            return b.id - a.id;
-        });
-        ctx.queue.sort((a, b) => {
-            const diff = getTicksLeft(a) - getTicksLeft(b);
-            if (diff) {
-                return diff;
-            }
-            return b.id - a.id;
-        });
-    }
-};
-
-const dequeueOne = (ctx) => {
-    if (ctx.params.policy == "FIFO") {
-        if (ctx.queue.length > 0) {
-            return ctx.queue.shift();
-        } else if (ctx.newArrivals.length > 0) {
-            return ctx.newArrivals.shift();
-        }
-    } else if (ctx.params.policy == "LIFO") {
-        if (ctx.newArrivals.length > 0) {
-            return ctx.newArrivals.pop();
-        } else if (ctx.queue.length > 0) {
-            return ctx.queue.pop();
-        }
-    } else if (ctx.params.policy == "NewFirst") {
-        if (ctx.newArrivals.length > 0) {
-            return ctx.newArrivals.shift();
-        } else if (ctx.queue.length > 0) {
-            return ctx.queue.shift();
-        }
-    } else if (ctx.params.policy == "DeadlinePriority") {
-        if (ctx.queue.length > 0 && ctx.newArrivals.length > 0) {
-            if (getTicksLeft(ctx.newArrivals[0]) < getTicksLeft(ctx.queue[0])) {
-                return ctx.newArrivals.shift();
-            } else {
-                return ctx.queue.shift();
-            }
-        } else if (ctx.queue.length > 0) {
-            return ctx.queue.shift();
-        } else if (ctx.newArrivals.length > 0) {
-            return ctx.newArrivals.shift();
-        }
-    }
-    return null;
-};
-
 // Returns true when done and all queues are cleared
 // The 'drain' argument indicates that no new tasks will arrive and all queues should drain.
 const step = (ctx, drain) => {
@@ -159,28 +250,19 @@ const step = (ctx, drain) => {
         }
     }
 
-    // Tick everything in each queue
-    for (let i = 0; i < ctx.newArrivals.length; i++) {
-        const task = ctx.newArrivals[i];
+    // Tick everything in each queue. Return 'true' if the operation's deadline has been reached.
+    ctx.queue.forEachAndRemoveIf((task) => {
         task.ticksWaiting += 1;
         if (task.ticksActive + task.ticksWaiting > task.timeout) {
-            ctx.newArrivals.splice(i, 1);
             ctx.timedOut += 1;
+            return true;
         }
-    }
-    for (let i = 0; i < ctx.queue.length; i++) {
-        const task = ctx.queue[i];
-        task.ticksWaiting += 1;
-        if (task.ticksActive + task.ticksWaiting > task.timeout) {
-            ctx.queue.splice(i, 1);
-            ctx.timedOut += 1;
-        }
-    }
+        return false;
+    });
 
     // If everything is empty, we are done.
     if (drain && availableWorkers.length == ctx.params.workers &&
-        ctx.newArrivals.length == 0 &&
-        ctx.queue.length == 0) {
+        ctx.queue.length() == 0) {
         return true;
     }
 
@@ -208,11 +290,14 @@ const step = (ctx, drain) => {
     }
 
     // Enqueue all new arrivals and repeated tasks.
-    enqueue(ctx, arrivals, repeats);
+    ctx.queue.enqueue(arrivals, repeats);
+    if (ctx.queue.length() > ctx.stats.queueMaxLen) {
+        ctx.stats.queueMaxLen = ctx.queue.length();
+    }
 
     // Allocate tasks to workers
     for (let i = 0; i < availableWorkers.length; i++) {
-        const task = dequeueOne(ctx);
+        const task = ctx.queue.dequeue();
         if (task !== null && task.ticksLeft > 0) {
             ctx.workers[availableWorkers[i]] = task;
         }
@@ -273,7 +358,7 @@ const runTrial = (context) => {
             context.log("----------------------------");
             logStats(context.done.map(task => task.ticksActive + task.ticksWaiting), context.log);
             context.log("completed", context.done.length);
-            context.log("remaining", context.queue.length + context.newArrivals.length);
+            context.log("remaining", context.queue.length());
             const totalTasks = context.done.length + context.timedOut;
             const timedOutPct = (100 * context.timedOut / totalTasks).toFixed(1);
             context.log("timed out", context.timedOut, `(${timedOutPct}%)`);
@@ -294,8 +379,7 @@ const runTrial = (context) => {
     const timedOutPct = (100 * context.timedOut / totalTasks).toFixed(1);
     context.log("timed out", context.timedOut, `(${timedOutPct}%)`);
     context.log("goodput (tasks/1000 ticks)", (1000 * context.done.length / ticks).toFixed(1));
-    context.log("arrival queue max length", context.stats.newMaxLen);
-    context.log("repeat queue max length", context.stats.queueMaxLen);
+    context.log("queue max length", context.stats.queueMaxLen);
 
     context.log("\n");
 }
