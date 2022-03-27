@@ -12,6 +12,68 @@
 </head>
 
 <body>
+    <table>
+        <tr>
+            <td>Iterations</td>
+            <td>
+                <input id="iterations" type="text" value="10000">
+            </td>
+        </tr>
+        <tr>
+            <td>Arrival Rate (tasks/tick)</td>
+            <td>
+                <input id="arrivalRateAvg" type="text" value="4">
+            </td>
+        </tr>
+        <tr>
+            <td>Arrival Rate Range (tasks/tick)</td>
+            <td>
+                <input id="arrivalRateRange" type="text" value="1">
+            </td>
+        </tr>
+        <tr>
+            <td>Workers</td>
+            <td>
+                <input id="workers" type="text" value="64">
+            </td>
+        </tr>
+        <tr>
+            <td>Work Average (ticks)</td>
+            <td>
+                <input id="workAvg" type="text" value="4">
+            </td>
+        </tr>
+        <tr>
+            <td>Work Range (ticks)</td>
+            <td>
+                <input id="workRange" type="text" value="2">
+            </td>
+        </tr>
+        <tr>
+            <td>Repeat Average (repeats/task)</td>
+            <td>
+                <input id="repeatAvg" type="text" value="4">
+            </td>
+        </tr>
+        <tr>
+            <td>Repeat Range (repeats/task)</td>
+            <td>
+                <input id="repeatRange" type="text" value="2">
+            </td>
+        </tr>
+        <tr>
+            <td>Timeout (ticks)</td>
+            <td>
+                <input id="timeout" type="text" value="5000">
+            </td>
+        </tr>
+        <tr>
+            <td colspan="2">
+                <button id="run" type="button">Run</button>
+            </td>
+        </tr>
+    </table>
+    </form>
     <div id="output"></div>
 </body>
 

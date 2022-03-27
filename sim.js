@@ -2,39 +2,15 @@
 // Queueing model simulator for re-entrant tasks. 
 //
 
-// TODO: test multiple trials
-const kIterations = 10000;
-
-// Average number of new tasks arriving per tick +- kArrivalRange
-const kArrivalRate = 4;
-const kArrivalRange = 1;
-
-// Number of workers that process a task per tick. 
-const kWorkers = 64;
-
-// Average number of ticks per task +- kWorkRange
-const kWorkAvg = 4;
-const kWorkRange = 2;
-
-// Average number of re-entries per task +- kWorkRepeatRange
-const kWorkRepeatAvg = 4;
-const kWorkRepeatRange = 2;
-
-// Limit on the number of ticks before a task is considered failed.
-const kTimeout = 5000;
-
-const initSimContext = () => {
+const initSimContext = (params) => {
     const ctx = {};
-    ctx.lastId = 0;
+    ctx.params = params;
 
     // When null, worker is available.
     ctx.workers = [];
-    for (let i = 0; i < kWorkers; i++) {
+    for (let i = 0; i < params.workers; i++) {
         ctx.workers[i] = null;
     }
-
-    // Queue policy.
-    ctx.policy;
 
     // Tasks waiting to run.
     ctx.queue = [];
@@ -54,24 +30,23 @@ const initSimContext = () => {
 
 const makeTask = (ctx) => {
     let task = {};
-    task.id = ++ctx.lastId;
     // Ticks spent waiting in a queue.
     task.ticksWaiting = 0;
     // Ticks remaining for this task for this repetition.
-    task.ticksLeft = getTicks();
+    task.ticksLeft = getTicks(ctx);
     // Number of times to re-queue in the system.
-    task.repeatsLeft = Math.floor(gaussianRandom(kWorkRepeatAvg - kWorkRepeatRange, kWorkRepeatAvg + kWorkRepeatRange));
+    task.repeatsLeft = Math.max(0, Math.floor(gaussianRandom(ctx.params.repeatAvg - ctx.params.repeatRange, ctx.params.repeatAvg + ctx.params.repeatRange)));
     // Number of ticks spent active across all repeats.
     task.ticksActive = 0;
     return task;
 }
 
-const getTicks = () => {
-    return Math.floor(gaussianRandom(kWorkAvg - kWorkRange, kWorkAvg + kWorkRange));
+const getTicks = (ctx) => {
+    return Math.floor(gaussianRandom(ctx.params.workAvg - ctx.params.workRange, ctx.params.workAvg + ctx.params.workRange));
 };
 
-const getNumArrivals = () => {
-    return Math.max(0, Math.floor(gaussianRandom(kArrivalRate - kArrivalRange, kArrivalRate + kArrivalRange)));
+const getNumArrivals = (ctx) => {
+    return Math.max(0, Math.floor(gaussianRandom(ctx.params.arrivalRate - ctx.params.arrivalRange, ctx.params.arrivalRate + ctx.params.arrivalRange)));
 };
 
 const enqueueNew = (ctx, tasks) => {
@@ -89,19 +64,19 @@ const enqueueRepeats = (ctx, tasks) => {
 };
 
 const dequeueOne = (ctx) => {
-    if (ctx.policy == "FIFO") {
+    if (ctx.params.policy == "FIFO") {
         if (ctx.queue.length > 0) {
             return ctx.queue.shift();
         } else if (ctx.newArrivals.length > 0) {
             return ctx.newArrivals.shift();
         }
-    } else if (ctx.policy == "LIFO") {
+    } else if (ctx.params.policy == "LIFO") {
         if (ctx.newArrivals.length > 0) {
             return ctx.newArrivals.pop();
         } else if (ctx.queue.length > 0) {
             return ctx.queue.pop();
         }
-    } else if (ctx.policy == "NewFirst") {
+    } else if (ctx.params.policy == "NewFirst") {
         if (ctx.newArrivals.length > 0) {
             return ctx.newArrivals.shift();
         } else if (ctx.queue.length > 0) {
@@ -127,7 +102,7 @@ const step = (ctx, drain) => {
         if (task.ticksLeft) {
             task.ticksLeft -= 1;
             task.ticksActive += 1;
-            if (task.ticksActive + task.ticksWaiting > kTimeout) {
+            if (task.ticksActive + task.ticksWaiting > ctx.params.timeout) {
                 ctx.timedOut.push(task);
                 availableWorkers.push(i);
                 ctx.workers[i] = null;
@@ -147,7 +122,7 @@ const step = (ctx, drain) => {
     for (let i = 0; i < ctx.newArrivals.length; i++) {
         const task = ctx.newArrivals[i];
         task.ticksWaiting += 1;
-        if (task.ticksActive + task.ticksWaiting > kTimeout) {
+        if (task.ticksActive + task.ticksWaiting > ctx.params.timeout) {
             ctx.newArrivals.splice(i, 1);
             ctx.timedOut.push(task);
         }
@@ -155,14 +130,14 @@ const step = (ctx, drain) => {
     for (let i = 0; i < ctx.queue.length; i++) {
         const task = ctx.queue[i];
         task.ticksWaiting += 1;
-        if (task.ticksActive + task.ticksWaiting > kTimeout) {
+        if (task.ticksActive + task.ticksWaiting > ctx.params.timeout) {
             ctx.queue.splice(i, 1);
             ctx.timedOut.push(task);
         }
     }
 
     // If everything is empty, we are done.
-    if (drain && availableWorkers.length == kWorkers &&
+    if (drain && availableWorkers.length == ctx.params.workers &&
         ctx.newArrivals.length == 0 &&
         ctx.queue.length == 0) {
         return true;
@@ -170,7 +145,7 @@ const step = (ctx, drain) => {
 
     // TODO: Use poisson distribution, not normal.
     // When draining, stop generating new arrivals.
-    const newArrivals = (drain) ? 0 : getNumArrivals();
+    const newArrivals = (drain) ? 0 : getNumArrivals(ctx);
     let arrivals = [];
 
     // Generate ticks required for each arrival
@@ -185,7 +160,7 @@ const step = (ctx, drain) => {
         if (task.repeatsLeft > 0) {
             task.repeatsLeft -= 1;
             // Refresh ticks when re-entering.
-            task.ticksLeft = getTicks();
+            task.ticksLeft = getTicks(ctx);
             repeats.push(task);
         } else {
             ctx.done.push(task);
@@ -243,14 +218,14 @@ const logStats = (dataSet) => {
 
 const runTrial = (context) => {
     log("-----------------")
-    log(`-- TRIAL: ${context.policy} --`)
+    log(`-- TRIAL: ${context.params.policy} --`)
     log("-----------------")
 
     let ticks = 0;
     let done = false;
     let isDraining = false;
     while (!done) {
-        const drain = ticks++ > kIterations;
+        const drain = ticks++ > context.params.iterations;
         if (!isDraining && drain) {
             isDraining = true;
 
@@ -288,22 +263,43 @@ const runTrial = (context) => {
     log("\n");
 }
 
-async function run() {
+function getParam(elemId) {
+    const val = document.getElementById(elemId).value;
+    log(elemId, val);
+    return Number(val);
+}
+
+async function run(done) {
     log("----------------");
     log("-- PARAMETERS --");
     log("----------------");
-    log("arrival ticks", kIterations);
-    log("workers", kWorkers);
-    log("timeout ticks", kTimeout);
-    log("arrival rate per tick (min,max)", kArrivalRate - kArrivalRange, kArrivalRate + kArrivalRange);
-    log("ticks per task (min,max)", kWorkAvg - kWorkRange, kWorkAvg + kWorkRange);
-    log("repeats per task (min,max)", kWorkRepeatAvg - kWorkRepeatRange, kWorkRepeatAvg + kWorkRepeatRange);
+    const params = {};
+    params.iterations = getParam("iterations");
+
+    // Number of workers that process a task per tick. 
+    params.workers = getParam("workers");
+
+    // Limit on the number of ticks before a task is considered failed.
+    params.timeout = getParam("timeout");
+
+    // Average number of new tasks arriving per tick +- range 
+    params.arrivalRate = getParam("arrivalRateAvg");
+    params.arrivalRange = getParam("arrivalRateRange");
+
+    // Average number of ticks per task +- range 
+    params.workAvg = getParam("workAvg");
+    params.workRange = getParam("workRange");
+
+    // Average number of re-entries per task +- range
+    params.repeatAvg = getParam("repeatAvg");
+    params.repeatRange = getParam("repeatRange");
 
     ["FIFO", "LIFO", "NewFirst"].forEach((policy) => {
-        const context = initSimContext();
-        context.policy = policy;
+        params.policy = policy;
+        const context = initSimContext(params);
         runTrial(context);
     });
+    done();
 }
 
 let output;
@@ -312,13 +308,25 @@ function log() {
     output.innerHTML += Array.from(arguments).join(" ") + "<br>";
 };
 
+let running = false;
 window.onload = () => {
     output = document.getElementById("output");
+    const runBtn = document.getElementById("run");
 
-    run().catch((err) => {
-        log(err);
-    });
-    // Output stats.
+    runBtn.onclick = () => {
+        if (!running) {
+            runBtn.innerHTML = "Running...";
+            runBtn.disabled = true;
+            output.innerHTML = "";
+            setTimeout(() => {
+                run(() => {
+                    runBtn.disabled = false;
+                    runBtn.innerHTML = "Run";
+                });
+            }, 1);
+        } else {
+        }
+    }
 };
 
 function sleep(ms) {
