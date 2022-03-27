@@ -83,6 +83,14 @@ const dequeueOne = (ctx) => {
         } else if (ctx.queue.length > 0) {
             return ctx.queue.shift();
         }
+    } else if (ctx.params.policy == "Random") {
+        if (Math.random() > .5 && ctx.newArrivals.length > 0) {
+            const r = Math.floor(Math.random() * ctx.newArrivals.length);
+            return ctx.newArrivals.splice(r, 1)[0];
+        } else if (ctx.queue.length > 0) {
+            const r = Math.floor(Math.random() * ctx.queue.length);
+            return ctx.queue.splice(r, 1)[0];
+        }
     }
     return null;
 };
@@ -285,7 +293,7 @@ async function run(output, done = () => { }) {
     params.repeatRange = getParam("repeatRange");
 
     output.innerHTML = "";
-    ["FIFO", "LIFO", "NewFirst"].forEach((policy) => {
+    ["FIFO", "LIFO", "NewFirst", "Random"].forEach((policy) => {
         params.policy = policy;
         let trialOutput = "";
         const context = initSimContext(params, function log() {
