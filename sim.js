@@ -13,13 +13,15 @@ const initSimContext = (params, logFn) => {
         ctx.workers[i] = null;
     }
 
+    ctx.lastId = 0;
+
     // Tasks waiting to run.
     ctx.queue = [];
     ctx.newArrivals = [];
     // Tasks that have completed.
     ctx.done = [];
-    // Tasks that failed after reaching their timeout.
-    ctx.timedOut = [];
+    // Number of tasks that failed after reaching their timeout.
+    ctx.timedOut = 0;
     // Stats
     ctx.stats = {
         ticks: 0,
@@ -31,6 +33,7 @@ const initSimContext = (params, logFn) => {
 
 const makeTask = (ctx) => {
     let task = {};
+    task.id = ctx.lastId++;
     // Ticks spent waiting in a queue.
     task.ticksWaiting = 0;
     // Ticks remaining for this task for this repetition.
@@ -39,6 +42,13 @@ const makeTask = (ctx) => {
     task.repeatsLeft = Math.max(0, Math.floor(gaussianRandom(ctx.params.repeatAvg - ctx.params.repeatRange, ctx.params.repeatAvg + ctx.params.repeatRange)));
     // Number of ticks spent active across all repeats.
     task.ticksActive = 0;
+    // Number of ticks before this operation is considered timed-out.
+    // Use a bi-modal timeout.
+    if (Math.random() < ctx.params.timeoutRate) {
+        task.timeout = ctx.params.timeout;
+    } else {
+        task.timeout = Number.MAX_SAFE_INTEGER;
+    }
     return task;
 }
 
@@ -50,17 +60,36 @@ const getNumArrivals = (ctx) => {
     return poissonRandom(ctx.params.arrivalRate);
 };
 
-const enqueueNew = (ctx, tasks) => {
-    ctx.newArrivals.push(...tasks);
+const getTicksLeft = (task) => {
+    return task.timeout - (task.ticksActive + task.ticksWaiting);
+};
+
+const enqueue = (ctx, newArrivals, repeats) => {
+    ctx.newArrivals.push(...newArrivals);
     if (ctx.newArrivals.length > ctx.stats.newMaxLen) {
         ctx.stats.newMaxLen = ctx.newArrivals.length;
     }
-};
-
-const enqueueRepeats = (ctx, tasks) => {
-    ctx.queue.push(...tasks);
+    ctx.queue.push(...repeats);
     if (ctx.queue.length > ctx.stats.queueMaxLen) {
         ctx.stats.queueMaxLen = ctx.queue.length;
+    }
+
+    if (ctx.params.policy == "DeadlinePriority") {
+        // Sort both queues by deadline priority and pick the operation with the closest deadline.
+        ctx.newArrivals.sort((a, b) => {
+            const diff = getTicksLeft(a) - getTicksLeft(b);
+            if (diff) {
+                return diff;
+            }
+            return b.id - a.id;
+        });
+        ctx.queue.sort((a, b) => {
+            const diff = getTicksLeft(a) - getTicksLeft(b);
+            if (diff) {
+                return diff;
+            }
+            return b.id - a.id;
+        });
     }
 };
 
@@ -83,13 +112,17 @@ const dequeueOne = (ctx) => {
         } else if (ctx.queue.length > 0) {
             return ctx.queue.shift();
         }
-    } else if (ctx.params.policy == "Random") {
-        if (Math.random() > .5 && ctx.newArrivals.length > 0) {
-            const r = Math.floor(Math.random() * ctx.newArrivals.length);
-            return ctx.newArrivals.splice(r, 1)[0];
+    } else if (ctx.params.policy == "DeadlinePriority") {
+        if (ctx.queue.length > 0 && ctx.newArrivals.length > 0) {
+            if (getTicksLeft(ctx.newArrivals[0]) < getTicksLeft(ctx.queue[0])) {
+                return ctx.newArrivals.shift();
+            } else {
+                return ctx.queue.shift();
+            }
         } else if (ctx.queue.length > 0) {
-            const r = Math.floor(Math.random() * ctx.queue.length);
-            return ctx.queue.splice(r, 1)[0];
+            return ctx.queue.shift();
+        } else if (ctx.newArrivals.length > 0) {
+            return ctx.newArrivals.shift();
         }
     }
     return null;
@@ -111,8 +144,8 @@ const step = (ctx, drain) => {
         if (task.ticksLeft) {
             task.ticksLeft -= 1;
             task.ticksActive += 1;
-            if (task.ticksActive + task.ticksWaiting > ctx.params.timeout) {
-                ctx.timedOut.push(task);
+            if (task.ticksActive + task.ticksWaiting > task.timeout) {
+                ctx.timedOut += 1;
                 availableWorkers.push(i);
                 ctx.workers[i] = null;
             } else if (task.ticksLeft == 0) {
@@ -130,17 +163,17 @@ const step = (ctx, drain) => {
     for (let i = 0; i < ctx.newArrivals.length; i++) {
         const task = ctx.newArrivals[i];
         task.ticksWaiting += 1;
-        if (task.ticksActive + task.ticksWaiting > ctx.params.timeout) {
+        if (task.ticksActive + task.ticksWaiting > task.timeout) {
             ctx.newArrivals.splice(i, 1);
-            ctx.timedOut.push(task);
+            ctx.timedOut += 1;
         }
     }
     for (let i = 0; i < ctx.queue.length; i++) {
         const task = ctx.queue[i];
         task.ticksWaiting += 1;
-        if (task.ticksActive + task.ticksWaiting > ctx.params.timeout) {
+        if (task.ticksActive + task.ticksWaiting > task.timeout) {
             ctx.queue.splice(i, 1);
-            ctx.timedOut.push(task);
+            ctx.timedOut += 1;
         }
     }
 
@@ -174,9 +207,8 @@ const step = (ctx, drain) => {
         }
     }
 
-    // Enqueue all new arrivals.
-    enqueueNew(ctx, arrivals);
-    enqueueRepeats(ctx, repeats);
+    // Enqueue all new arrivals and repeated tasks.
+    enqueue(ctx, arrivals, repeats);
 
     // Allocate tasks to workers
     for (let i = 0; i < availableWorkers.length; i++) {
@@ -242,6 +274,9 @@ const runTrial = (context) => {
             logStats(context.done.map(task => task.ticksActive + task.ticksWaiting), context.log);
             context.log("completed", context.done.length);
             context.log("remaining", context.queue.length + context.newArrivals.length);
+            const totalTasks = context.done.length + context.timedOut;
+            const timedOutPct = (100 * context.timedOut / totalTasks).toFixed(1);
+            context.log("timed out", context.timedOut, `(${timedOutPct}%)`);
 
         }
         done = step(context, drain);
@@ -255,9 +290,9 @@ const runTrial = (context) => {
     context.log("-- SUMMARY --");
     context.log("-------------");
     context.log("total ticks", ticks);
-    const totalTasks = context.done.length + context.timedOut.length;
-    const timedOutPct = (100 * context.timedOut.length / totalTasks).toFixed(1);
-    context.log("timed out", context.timedOut.length, `(${timedOutPct}%)`);
+    const totalTasks = context.done.length + context.timedOut;
+    const timedOutPct = (100 * context.timedOut / totalTasks).toFixed(1);
+    context.log("timed out", context.timedOut, `(${timedOutPct}%)`);
     context.log("goodput (tasks/1000 ticks)", (1000 * context.done.length / ticks).toFixed(1));
     context.log("arrival queue max length", context.stats.newMaxLen);
     context.log("repeat queue max length", context.stats.queueMaxLen);
@@ -280,6 +315,7 @@ async function run(output, done = () => { }) {
 
     // Limit on the number of ticks before a task is considered failed.
     params.timeout = getParam("timeout");
+    params.timeoutRate = getParam("timeoutRate");
 
     // Average number of new tasks arriving per tick +- range 
     params.arrivalRate = getParam("arrivalRateAvg");
@@ -293,7 +329,7 @@ async function run(output, done = () => { }) {
     params.repeatRange = getParam("repeatRange");
 
     output.innerHTML = "";
-    ["FIFO", "LIFO", "NewFirst", "Random"].forEach((policy) => {
+    ["FIFO", "LIFO", "NewFirst", "DeadlinePriority"].forEach((policy) => {
         params.policy = policy;
         let trialOutput = "";
         const context = initSimContext(params, function log() {
