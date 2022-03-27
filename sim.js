@@ -2,9 +2,10 @@
 // Queueing model simulator for re-entrant tasks. 
 //
 
-const initSimContext = (params) => {
+const initSimContext = (params, logFn) => {
     const ctx = {};
     ctx.params = params;
+    ctx.log = logFn;
 
     // When null, worker is available.
     ctx.workers = [];
@@ -113,8 +114,7 @@ const step = (ctx, drain) => {
                 ctx.workers[i] = null;
             }
         } else {
-            console.error("negative ticks left");
-            log(task, i);
+            console.error("negative ticks left", task, i);
         }
     }
 
@@ -182,7 +182,7 @@ const step = (ctx, drain) => {
     return false;
 };
 
-const drawHist = (sorted) => {
+const drawHist = (sorted, log) => {
     const min = sorted[0];
     const max = sorted[sorted.length - 1];
     const range = max - min;
@@ -204,7 +204,7 @@ const drawHist = (sorted) => {
         log(`[${minTxt} - ${maxTxt}]: ${'='.repeat(fill)} ${buckets[i]}`);
     }
 }
-const logStats = (dataSet) => {
+const logStats = (dataSet, log) => {
     const sorted = dataSet.sort((a, b) => a - b);
     log("avg", average(sorted).toFixed(1));
     log("dev", stdDev(sorted).toFixed(1));
@@ -213,13 +213,13 @@ const logStats = (dataSet) => {
     log("p95", percentileSorted(sorted, 0.95));
     log("p99", percentileSorted(sorted, 0.99));
     log("max", sorted[sorted.length - 1]);
-    drawHist(sorted);
+    drawHist(sorted, log);
 };
 
 const runTrial = (context) => {
-    log("-----------------")
-    log(`-- TRIAL: ${context.params.policy} --`)
-    log("-----------------")
+    context.log("-----------------")
+    context.log(`-- TRIAL: ${context.params.policy} --`)
+    context.log("-----------------")
 
     let ticks = 0;
     let done = false;
@@ -229,50 +229,40 @@ const runTrial = (context) => {
         if (!isDraining && drain) {
             isDraining = true;
 
-            log("----------------------------");
-            log("-- LATENCIES BEFORE DRAIN --");
-            log("----------------------------");
-            logStats(context.done.map(task => task.ticksActive + task.ticksWaiting));
+            context.log("----------------------------");
+            context.log("-- LATENCIES BEFORE DRAIN --");
+            context.log("----------------------------");
+            logStats(context.done.map(task => task.ticksActive + task.ticksWaiting), context.log);
 
         }
         done = step(context, drain);
     }
 
-    // Calcuate some summary statistics.
-    // log("-- waiting latencies --");
-    // logStats(context.done.map(task => task.ticksWaiting))
-
-    // log("-- processing latencies --");
-    // logStats(context.done.map(task => task.ticksActive));
-
-    log("---------------------");
-    log("-- TOTAL LATENCIES --");
-    log("---------------------");
-    logStats(context.done.map(task => task.ticksActive + task.ticksWaiting));
-    log("-------------");
-    log("-- RESULTS --");
-    log("-------------");
-    log("total ticks", ticks);
+    context.log("---------------------");
+    context.log("-- TOTAL LATENCIES --");
+    context.log("---------------------");
+    logStats(context.done.map(task => task.ticksActive + task.ticksWaiting), context.log);
+    context.log("-------------");
+    context.log("-- RESULTS --");
+    context.log("-------------");
+    context.log("total ticks", ticks);
     const totalTasks = context.done.length + context.timedOut.length;
     const timedOutPct = (100 * context.timedOut.length / totalTasks).toFixed(2);
-    log("timed out", context.timedOut.length, `${timedOutPct}%`);
-    log("goodput (tasks/tick)", (context.done.length / ticks).toFixed(3));
-    log("arrival queue max length", context.stats.newMaxLen);
-    log("repeat queue max length", context.stats.queueMaxLen);
+    context.log("timed out", context.timedOut.length, `(${timedOutPct}%)`);
+    context.log("goodput (tasks/tick)", (context.done.length / ticks).toFixed(3));
+    context.log("arrival queue max length", context.stats.newMaxLen);
+    context.log("repeat queue max length", context.stats.queueMaxLen);
 
-    log("\n");
+    context.log("\n");
 }
 
 function getParam(elemId) {
     const val = document.getElementById(elemId).value;
-    log(elemId, val);
+    console.log(elemId, val);
     return Number(val);
 }
 
-async function run(done) {
-    log("----------------");
-    log("-- PARAMETERS --");
-    log("----------------");
+async function run(output, done = () => { }) {
     const params = {};
     params.iterations = getParam("iterations");
 
@@ -294,38 +284,35 @@ async function run(done) {
     params.repeatAvg = getParam("repeatAvg");
     params.repeatRange = getParam("repeatRange");
 
+    output.innerHTML = "";
     ["FIFO", "LIFO", "NewFirst"].forEach((policy) => {
         params.policy = policy;
-        const context = initSimContext(params);
+        let trialOutput = "";
+        const context = initSimContext(params, function log() {
+            console.log.apply(null, arguments);
+            trialOutput += Array.from(arguments).join(" ") + "<br>";
+        });
         runTrial(context);
+        output.innerHTML += `<div class='trial'>${trialOutput}</div>`;
     });
     done();
 }
 
-let output;
-function log() {
-    console.log.apply(null, arguments);
-    output.innerHTML += Array.from(arguments).join(" ") + "<br>";
-};
 
-let running = false;
 window.onload = () => {
-    output = document.getElementById("output");
+    const output = document.getElementById("trials");
     const runBtn = document.getElementById("run");
 
+    run(output);
     runBtn.onclick = () => {
-        if (!running) {
-            runBtn.innerHTML = "Running...";
-            runBtn.disabled = true;
-            output.innerHTML = "";
-            setTimeout(() => {
-                run(() => {
-                    runBtn.disabled = false;
-                    runBtn.innerHTML = "Run";
-                });
-            }, 1);
-        } else {
-        }
+        runBtn.innerHTML = "Running...";
+        runBtn.disabled = true;
+        setTimeout(() => {
+            run(output, () => {
+                runBtn.disabled = false;
+                runBtn.innerHTML = "Run";
+            });
+        }, 1);
     }
 };
 
