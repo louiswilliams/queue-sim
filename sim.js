@@ -109,6 +109,9 @@ class NewFirstQueue extends Queue {
     length() { return this.newArrivals.length + this.repeats.length; }
 };
 
+/**
+ * Prioritizes operations based on how much time they have remaining before their timeout expires.
+ */
 class DeadlinePriorityQueue extends Queue {
     constructor() {
         super();
@@ -148,6 +151,55 @@ class DeadlinePriorityQueue extends Queue {
     length() { return this.queue.length; }
 };
 
+/**
+ * Operations with a timeout are put into a LIFO queue and operations without are put in a FIFO queue. 
+ */
+class HybridQueue extends Queue {
+    constructor() {
+        super();
+        this.lifo = [];
+        this.fifo = [];
+    }
+
+    enqueue(newArrivals, repeats) {
+        [...newArrivals, ...repeats].forEach((task) => {
+            if (task.timeout == Number.MAX_SAFE_INTEGER) {
+                this.fifo.push(task);
+            } else {
+                this.lifo.push(task);
+            }
+        });
+    }
+
+    dequeue() {
+        if (this.lifo.length > 0) {
+            return this.lifo.pop();
+        } else if (this.fifo.length > 0) {
+            return this.fifo.shift();
+        } else {
+            return null;
+        }
+    }
+
+    forEachAndRemoveIf(eachFn) {
+        for (let i = 0; i < this.lifo.length; i++) {
+            if (eachFn(this.lifo[i])) {
+                this.lifo.splice(i, 1);
+            }
+        }
+        for (let i = 0; i < this.fifo.length; i++) {
+            if (eachFn(this.fifo[i])) {
+                this.fifo.splice(i, 1);
+            }
+        }
+    }
+
+    length() {
+        return this.lifo.length + this.fifo.length;
+    }
+};
+
+
 const initSimContext = (params, logFn) => {
     const ctx = {};
     ctx.params = params;
@@ -170,6 +222,8 @@ const initSimContext = (params, logFn) => {
         ctx.queue = new NewFirstQueue();
     } else if (params.policy == "DeadlinePriority") {
         ctx.queue = new DeadlinePriorityQueue();
+    } else if (params.policy == "Hybrid") {
+        ctx.queue = new HybridQueue();
     } else {
         throw "unknown queue";
     }
@@ -413,7 +467,7 @@ async function run(output, done = () => { }) {
     params.repeatRange = getParam("repeatRange");
 
     output.innerHTML = "";
-    ["FIFO", "LIFO", "NewFirst", "DeadlinePriority"].forEach((policy) => {
+    ["FIFO", "LIFO", "NewFirst", "DeadlinePriority", "Hybrid"].forEach((policy) => {
         params.policy = policy;
         let trialOutput = "";
         const context = initSimContext(params, function log() {
